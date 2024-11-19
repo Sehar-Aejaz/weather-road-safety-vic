@@ -1,0 +1,739 @@
+---
+title: "task"
+output: html_document
+date: "2024-10-03"
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Car accident dataset
+
+```{r}
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(readr)
+car_accidents <- read_csv("/Users/seharaejaz/Downloads/T09.D2/car_accidents_victoria.csv")
+
+head(car_accidents)
+```
+
+
+```{r}
+
+cat("The number of rows in the dataset is:", nrow(car_accidents))
+
+cat("\nThe number of columns in the dataset is:", ncol(car_accidents))
+```
+
+
+```{r}
+str(car_accidents)
+```
+
+The dataset contains two header rows, which has resulted in every
+column's data type being recognized as character (char). This is
+reflected in the structure of the data frame as shown above.
+
+The dataset contains 1,644 rows and 29 columns. It has two header rows,
+which has resulted in every column's data type being recognized as
+character (char). This indicates that the data is being treated as
+strings, rather than numerical values. This is problematic for analysis
+since numerical operations cannot be performed on character strings
+directly.
+
+### Structure Representation
+
+The structure of the dataset shows that each column is represented as
+follows: - `...1`: A character column with date entries. -
+`EASTERN REGION`, `METROPOLITAN NORTH WEST REGION`, etc.: Character
+columns representing various types of accident data, categorized into
+"FATAL", "SERIOUS", "NOINJURY", and "OTHER".
+
+If we read the data without the first header row, the structure changes,
+and the new column names are generated automatically. The updated
+structure looks like this:
+
+```{r}
+car_acc <- read_csv("/Users/seharaejaz/Downloads/T09.D2/car_accidents_victoria.csv", skip = 1)
+str(car_acc)
+```
+
+After removing the first header row, the structure is represented as
+follows:
+
+Updated Rows and Columns: The data is now has 1,643 rows and 29 columns.
+
+New Column Names: The column names for injury counts now appear with
+suffixes (e.g., FATAL...2, SERIOUS...3). This might cause issues in
+subsequent analyses, as the duplicated and renamed columns can be
+confusing.
+
+### Data Type Changes
+
+After removing the first header row, the column types also change: -
+**DATE**: Stays as character (`chr`) since it hasn’t been converted to a
+date format yet. - **Injury Counts**: Now categorized as numeric
+(`num`). This change allows for numerical calculations, making it
+possible to analyze trends and summarize data effectively.
+
+
+```{r}
+regions <- names(car_accidents)[sapply(car_accidents, is.character) & !grepl("\\d", names(car_accidents))]
+cat("The number of regions in the dataset are: ", length(regions), "\n")
+regions
+
+```
+
+```{r}
+# Extract the date range while ignoring the first row
+date_range <- range(car_accidents$...1[-1], na.rm = TRUE)
+
+# Print the date range
+print(paste("Date range:", date_range[1], "to", date_range[2]))
+
+```
+
+
+# Tidy data
+
+## Cleaning up columns.
+
+```{r}
+cav_data_link <- '/Users/seharaejaz/Downloads/T09.D2/car_accidents_victoria.csv'
+top_row <- read_csv(cav_data_link, col_names = FALSE, n_max = 1) 
+second_row <- read_csv(cav_data_link, n_max = 1)
+column_names <- second_row %>%
+  unlist(., use.names=FALSE) %>%
+  make.unique(., sep = "__") # double underscore
+
+column_names[2:5] <- str_c(column_names[2:5], '0', sep='__')
+
+daily_accidents <- read_csv(cav_data_link, skip = 2, col_names = column_names)
+```
+
+```{r}
+head(daily_accidents)
+```
+
+
+
+
+```{r}
+library(tidyr)
+library(dplyr)
+
+# Pivot longer to combine the __0, __1, ..., __6 suffixes into a single column per variable
+tidy_data <- daily_accidents %>%
+  pivot_longer(
+    cols = starts_with("FATAL") | starts_with("SERIOUS") | starts_with("NOINJURY") | starts_with("OTHER"), 
+    names_to = c(".value", "source"), 
+    names_sep = "__"
+  ) %>%
+  mutate(
+    REGION = regions[as.numeric(source) + 1]  # Map the source suffix (e.g., 0, 1, 2) to the corresponding region
+  ) %>%
+  #select(-source)  # Remove the source column as it's no longer needed
+
+# Inspect the resulting tidy data
+print(tidy_data)
+
+```
+
+
+
+#### 1. **Loading Data**:
+
+First, I loaded the dataset which has multiple columns for the same type
+of measurements (`FATAL`, `SERIOUS`, etc.) across different regions
+identified by suffixes (`__0`, `__1`, etc.).
+
+#### 2. **Using `pivot_longer`**:
+
+I applied `pivot_longer` to gather the wide-format columns for `FATAL`,
+`SERIOUS`, `NOINJURY`, and `OTHER` measurements into a single column.
+Each measurement has multiple versions (one for each region), so I used
+`names_to = c(".value", "source")` to split the column names by a
+separator (`__`) into two parts: - **`.value`**: This part keeps the
+actual variable names (`FATAL`, `SERIOUS`, etc.). - **`source`**: This
+holds the numeric suffix (e.g., `0`, `1`, etc.) which represents
+different regions.
+
+#### 3. **Mapping Regions**:
+
+After gathering, we create a `region` column by mapping the numeric
+suffix (`source`) to its corresponding region name. We define a vector
+`regions` which holds the region names in order. We use `mutate()` to
+create a new column `region` where the suffixes (`0`, `1`, `2`, etc.)
+are mapped to the respective region names from the `regions` list.
+
+
+
+```{r}
+head(tidy_data)
+```
+
+This shows how the wide data format has been transformed into a long
+tidy format with each row representing a unique DATE and REGION
+combination, along with the corresponding values for FATAL, SERIOUS,
+NOINJURY, and OTHER.
+
+The data types of the variables are not as expected: the DATE variable
+is in character format instead of the required Date type, while the
+FATAL, SERIOUS, NOINJURY, and OTHER variables are correctly set as
+numeric (double). The REGION variable is in character format, which is
+acceptable but could be converted to a factor for categorical analysis.
+
+```{r}
+library(lubridate)
+
+# Assuming your data frame is named tidy_data
+tidy_data <- tidy_data %>%
+  # Convert the DATE column to Date type
+  mutate(DATE = dmy(DATE),  # dmy() assumes "day-month-year" format
+         FATAL = as.numeric(FATAL),  # Ensure FATAL remains numeric
+         SERIOUS = as.numeric(SERIOUS),  # Ensure SERIOUS remains numeric
+         NOINJURY = as.numeric(NOINJURY),  # Ensure NOINJURY remains numeric
+         OTHER = as.numeric(OTHER),  # Ensure OTHER remains numeric
+         REGION = as.character(REGION))  # Convert REGION to character if needed
+
+# Print the head of the cleaned dataset
+print(head(tidy_data))
+```
+
+After the cleanup process, the DATE variable has been successfully
+converted to the Date type, ensuring that all variables now have the
+appropriate types.
+
+
+```{r}
+missing_values <- colSums(is.na(tidy_data))
+print(missing_values)
+
+```
+
+We can see that there are missing values in the FATAL, SERIOUS, and
+OTHER columns. 
+- FATAL: 1 missing value 
+- SERIOUS: 1 missing value 
+- OTHER: 2 missing values
+
+#### Steps to Fix Missing Values
+
+-   FATAL: Replace the missing value with 0, indicating that there were
+    no fatalities reported on that day.
+-   SERIOUS: Replace the missing value with 0, indicating no serious
+    injuries occurred.
+-   OTHER: Replace the missing values with 0. This suggests that there
+    were no other types of incidents reported for those days.
+
+```{r}
+# Replace NA in FATAL, SERIOUS and OTHER columns with 0
+tidy_data$FATAL[is.na(tidy_data$FATAL)] <- 0
+tidy_data$SERIOUS[is.na(tidy_data$SERIOUS)] <- 0
+tidy_data$OTHER[is.na(tidy_data$OTHER)] <- 0
+
+# Check the number of missing values after replacement
+sum(is.na(tidy_data))
+```
+Now the dataset doesn't have any missing values.
+
+#### Justification for Actions
+- Replacing with 0: This is a common practice in datasets dealing with counts of incidents, ensuring the statistical analysis reflects accurate counts. By using 0, it's indicated that no incidents were reported, rather than implying that data is missing.
+
+## Fitting distributions
+
+```{r}
+TOTAL_ACCIDENTS <- tidy_data
+```
+
+
+### Fit a Poisson distribution and a negative binomial distribution on TOTAL_ACCIDENTS. 
+
+```{r}
+library(fitdistrplus)
+
+# Fit Poisson distribution
+fit_poisson <- fitdist(TOTAL_ACCIDENTS$FATAL, "pois")
+summary(fit_poisson)
+
+```
+
+```{r}
+# Fit Negative Binomial distribution
+fit_nb <- fitdist(TOTAL_ACCIDENTS$FATAL, "nbinom")
+summary(fit_nb)
+
+```
+
+```{r}
+# Plot the fits
+plot.legend <- c("Poisson", "Negative Binomial")
+denscomp(list(fit_poisson, fit_nb), legendtext = plot.legend)
+
+```
+
+
+
+### Compare the log-likelihood of two fitted distributions. 
+
+```{r}
+print(fit_poisson$loglik)
+print(fit_nb$loglik)
+```
+
+The log-likelihood values for the Poisson and Negative Binomial distributions are:
+
+- **Poisson Log-Likelihood**: -4428.277
+- **Negative Binomial Log-Likelihood**: -4426.347
+
+Since the **Negative Binomial distribution** has a **higher log-likelihood** (-4426.347) compared to the Poisson distribution (-4428.277), the **Negative Binomial distribution** fits the data better. The difference, while small, indicates that the Negative Binomial model is better at capturing the variability in the data.
+
+The Negative Binomial distribution accounts for **overdispersion**, meaning it can handle cases where the variance is greater than the mean. In contrast, the Poisson distribution assumes that the mean and variance are equal. The improvement in log-likelihood suggests that the data shows some level of overdispersion, which the Negative Binomial distribution is better suited to model.
+
+### Trying one more distribution. Trying to fit all 3 distributions to two different accident types. 
+
+```{r}
+
+# Assume accident_type_a and accident_type_b are your datasets
+fit_poisson_a <- fitdist(TOTAL_ACCIDENTS$SERIOUS, "pois")
+fit_nb_a <- fitdist(TOTAL_ACCIDENTS$SERIOUS, "nbinom")
+fit_geom_a <- fitdist(TOTAL_ACCIDENTS$SERIOUS, "geom")
+
+fit_poisson_b <- fitdist(TOTAL_ACCIDENTS$FATAL, "pois")
+fit_nb_b <- fitdist(TOTAL_ACCIDENTS$FATAL, "nbinom")
+fit_geom_b <- fitdist(TOTAL_ACCIDENTS$FATAL, "geom")
+
+# Collecting Log-likelihood values
+log_likelihoods <- data.frame(
+  Distribution = c("Poisson", "Negative Binomial", "Geometric"),
+  SERIOUS = c(fit_poisson_a$loglik, fit_nb_a$loglik, fit_geom_a$loglik),
+  FATAL = c(fit_poisson_b$loglik, fit_nb_b$loglik, fit_geom_b$loglik)
+)
+
+print(log_likelihoods)
+```
+The results from fitting three different probability distributions—Poisson, Negative Binomial, and Geometric—to the **SERIOUS** and **FATAL** accident types reveal important insights into their underlying characteristics. 
+
+For the **SERIOUS** accident type, the **Negative Binomial distribution** achieved the highest log-likelihood value of -22092.47, indicating it provides the best fit for the data compared to the Poisson (-26708.20) and Geometric (-22094.67) distributions. This is consistent with the expectation that serious accidents may exhibit overdispersion, where the variance exceeds the mean due to factors such as varying severity and frequency in the data.
+
+In contrast, for the **FATAL** accident type, the Poisson distribution recorded a log-likelihood of -4428.277, while the Negative Binomial closely followed at -4426.347. Here, the Poisson distribution demonstrates a comparable fit, suggesting that the fatal accidents data may not exhibit the same level of overdispersion, allowing for a simpler model to adequately describe it.
+
+Overall, the analysis indicates that the **Negative Binomial distribution** is preferable for modeling serious accidents due to its capacity to accommodate overdispersion, while the Poisson distribution remains effective for fatal accidents. This distinction is crucial for informing targeted safety measures and resource allocation strategies to reduce accident rates effectively.
+
+## Source weather data
+
+
+I plan to use weather data from the Australian Bureau of Meteorology (BoM). Specifically, I am utilizing the historical climate data that includes daily temperature, precipitation, and other key weather variables.
+
+**Justification:**
+
+- Reliability: BoM is the official weather agency in Australia, providing accurate and high-quality data collected using standardized methods.
+
+- Comprehensive Coverage: The dataset offers detailed daily records of temperature, precipitation, and other weather variables, essential for in-depth analysis.
+
+- Relevance: The data is specifically tailored to Australian regions, ensuring it is pertinent to my study.
+
+- Accessibility: The BoM website allows for easy access to customized datasets, facilitating efficient data retrieval.
+
+### From the data source identified, downloaded daily temperature and precipitation data for the region during the relevant time period.
+
+```{r}
+precip_2016 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0009_086338_2016_Data.csv")
+precip_2017 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0009_086338_2017_Data.csv")
+precip_2018 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0009_086338_2018_Data.csv")
+precip_2019 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0009_086338_2019_Data.csv")
+
+precip_data <- rbind(precip_2016, precip_2017, precip_2018, precip_2019)
+
+precip_data
+```
+
+```{r}
+# Combine Year, Month, and Day into a single Date column
+precip_data$Date <- as.Date(paste(precip_data$Year, precip_data$Month, precip_data$Day, sep = "-"), format = "%Y-%m-%d")
+
+precip_data <- precip_data[, !(names(precip_data) %in% c("Year", "Month", "Day"))]
+
+head(precip_data)
+
+```
+
+
+
+```{r}
+
+temp_2016 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0010_086338_2016_Data.csv")
+temp_2017 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0010_086338_2017_Data.csv")
+temp_2018 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0010_086338_2018_Data.csv")
+temp_2019 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0010_086338_2019_Data.csv")
+
+temp_data <- rbind(temp_2016, temp_2017, temp_2018, temp_2019)
+
+temp_data
+```
+
+```{r}
+# Combine Year, Month, and Day into a single Date column
+temp_data$Date <- as.Date(paste(temp_data$Year, temp_data$Month, temp_data$Day, sep = "-"), format = "%Y-%m-%d")
+
+temp_data <- temp_data[, !(names(temp_data) %in% c("Year", "Month", "Day"))]
+
+head(temp_data)
+```
+
+
+```{r}
+weather_data <- full_join(temp_data, precip_data, 
+                          by = ("Date"))
+
+head(weather_data)
+```
+
+```{r}
+weather_data <- weather_data[, !(names(weather_data) %in% c("Product code.x", 
+                                                    "Bureau of Meteorology station number.x", 
+                                                    "Quality.x", 
+                                                    "Product code.y", 
+                                                    "Bureau of Meteorology station number.y", 
+                                                    "Quality.y"))]
+
+weather_data
+```
+
+
+```{r}
+cat("The weather data has ", nrow(weather_data), " rows.\n")
+```
+
+
+
+```{r}
+# Extract the date range while ignoring the first row
+date_range1 <- range(weather_data$Date[-1], na.rm = TRUE)
+
+# Print the date range
+print(paste("Date range:", date_range1[1], "to", date_range1[2]))
+
+```
+
+```{r}
+# Check for missing values in the dataset
+missing_values_count <- colSums(is.na(weather_data))
+print(missing_values_count)
+```
+```{r}
+weather_data <- weather_data %>%
+  mutate(across(everything(), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+```
+
+
+
+### Using the NOAA data to calculate the daily EHF values for the area chosen during the relevant time period. Plot the daily EHF values.
+
+```{r}
+colnames(weather_data)[colnames(weather_data) == "Date"] <- "DATE"
+weather_data$DATE <- as.Date(weather_data$DATE)
+
+# Calculate the mean temperature
+T_ref <-  mean(weather_data$`Maximum temperature (Degree C)`)
+
+# Calculate EHF using the mean temperature as the baseline
+weather_data$EHF <- (weather_data$`Maximum temperature (Degree C)` - T_ref) / T_ref
+
+
+
+# Subset the weather data to include only the dates matching car accidents
+matched_data <- merge(weather_data, tidy_data, by = "DATE")
+
+# Plot the EHF values
+ggplot(matched_data, aes(x = DATE, y = EHF)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(color = "red") +
+  labs(title = "Daily Excess Heat Factor (EHF)",
+       x = "Date",
+       y = "EHF") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+## Model planning
+
+The main goal of the model is to predict the likelihood of road traffic accidents and their severity based on weather conditions (such as rainfall, temperature, and extreme heat). This model will help in anticipating accident trends during different weather events and seasons, potentially preventing accidents or reducing their severity through preemptive measures.
+
+#### Relevance 
+
+The model will help predict periods with higher risks of severe accidents (e.g., during extreme weather), allowing emergency services to allocate resources more efficiently. Knowing when and where accidents are likely to occur will enable faster response times and better resource planning.
+
+#### Potential users 
+
+Potential users include emergency service agencies (such as ambulance and fire services), traffic management authorities (like VicRoads), insurance companies, policymakers, and city planners who need to prepare for accident-prone conditions, especially during severe weather.
+
+
+### Relationship and data:
+
+The goal is to model the relationship between weather conditions and the number/severity of road traffic accidents. Specifically, the model will predict how factors like rainfall, temperature, and extreme heat contribute to the likelihood and severity of accidents.
+
+#### Response variable
+
+The response variable will be either the severity of accidents (e.g., minor vs. severe/fatal) or the number of accidents in a given time frame.
+
+#### Predictor variables
+
+Predictor variables could include:
+- Weather-related variables: temperature, rainfall, wind speed, and other extreme conditions.
+- Time-based variables: time of day, day of the week, month, and season.
+- Other possible variables: road conditions, traffic density, and vehicle type.
+
+
+#### Statistical method(s) applied to generate the model
+
+The Generalized Linear Model (GLM) will be employed to analyze and predict road accidents in relation to weather conditions. GLMs are suitable because they can handle various types of response variables, including counts or binary outcomes, which align with the nature of road accident data. Their flexibility allows for the use of different distributions, such as Poisson for count data or logistic for severity outcomes, making them ideal for this analysis .
+
+Using GLMs enhances interpretability, allowing stakeholders in emergency services to understand how predictors, like weather patterns, affect accident frequency and severity. This clarity is crucial for effective resource planning and response strategies during extreme weather events . Overall, GLMs provide a robust framework for improving predictive modeling of road accidents, ensuring better preparedness for emergency services .
+
+## Model the number of road traffic accidents
+
+
+I selected the **METROPOLITAN SOUTH EAST REGION** of Victoria, focusing specifically on the weather data from the Melbourne (Olympic Park) station.
+
+
+```{r}
+filtered_data <- matched_data %>%
+  filter(REGION == "METROPOLITAN SOUTH EAST REGION")  # Replace 'Region' with the actual column name
+
+filtered_data <- filtered_data %>%
+  mutate(total_accidents = FATAL + SERIOUS + NOINJURY + OTHER)
+
+filtered_data <- filtered_data %>%
+  rename(
+    MaxTemp = `Maximum temperature (Degree C)`,
+    Rainfall = `Rainfall amount (millimetres)`
+  )
+
+# Fit the linear model using the specified predictor variables
+linear_model <- lm(total_accidents ~ MaxTemp + Rainfall + EHF, data = filtered_data)
+
+# Display the summary of the model
+summary(linear_model)
+
+
+
+```
+
+Based on the analysis of the linear model fitted to predict total accidents using maximum temperature, rainfall, and EHF as predictors, we can assess the sufficiency of a linear function for modeling the trend of total accidents. The model was constructed using the formula:
+
+total_accidents ∼ Maximum temperature (°C) + Rainfall amount (mm) + EHF .
+
+The results revealed that the coefficients for maximum temperature and rainfall were not statistically significant, with p-values of 0.248 and 0.677, respectively. This suggests that these variables do not provide strong predictive power for total accidents. Furthermore, the Multiple R-squared value of 0.0009468 and Adjusted R-squared of -0.0004237 indicate that the model explains very little variance in total accidents, implying a poor fit overall.
+
+```{r}
+# Get fitted values and residuals
+fitted_values <- fitted(linear_model)
+residuals <- residuals(linear_model)
+
+# Plot Fitted Values vs Residuals
+plot(fitted_values, residuals, 
+     main = "Fitted Values vs. Residuals",
+     xlab = "Fitted Values", 
+     ylab = "Residuals",
+     pch = 19, col = "blue")
+abline(h = 0, col = "red", lwd = 2)  # Add a horizontal line at 0
+
+```
+
+
+```{r}
+# Q-Q plot for residuals
+qqnorm(residuals)
+qqline(residuals, col = "red")
+
+```
+
+The Fitted Values vs. Residuals Plot indicated that the residuals were randomly scattered around zero without any apparent pattern. This observation suggests that the assumptions of linearity and homoscedasticity are reasonably met, indicating that the model captures the relationship between the predictors and total accidents without significant violations of these assumptions. Additionally, the Normal Q-Q Plot demonstrated that the residuals closely followed a straight line, indicating they are approximately normally distributed. Although there were slight deviations in the tails, the overall normality assumption appears to be satisfied.
+
+In conclusion, while the linear model adheres to the basic assumptions required for regression analysis, its performance is weak. The low R-squared values and non-significant predictors underscore the model's lack of explanatory power, suggesting that while it captures some aspects of the data, it is insufficient for accurately modeling the trend of total accidents.
+
+
+```{r}
+library(mgcv)
+
+# Fit the GAM model
+library(mgcv)
+gam_model <- gam(total_accidents ~ s(MaxTemp) + s(Rainfall) + s(EHF), data = filtered_data)
+
+# Display the summary
+summary(gam_model)
+
+
+```
+
+The model formula incorporates smooth functions for three predictors: maximum temperature (MaxTemp), rainfall, and the EHF. The intercept is significant, but the smooth terms for MaxTemp and EHF show approximate degrees of freedom (edf) close to one, with F-values indicating that they do not significantly explain the variance in the response variable (total accidents). The overall model fit is weak, as evidenced by a low adjusted R-squared value of 0.00107, which implies that only about 0.3% of the deviance in total accidents is explained by the model.
+
+```{r}
+# Plot the fitted values vs residuals
+par(mfrow = c(1, 2))  
+plot(gam_model, pages = 1)  
+
+# Check the residuals
+plot(gam_model$residuals ~ gam_model$fitted.values)
+abline(h = 0, col = "red")
+
+# Normal Q-Q plot
+qqnorm(gam_model$residuals)
+qqline(gam_model$residuals, col = "red")
+
+```
+The residuals plotted against fitted values exhibit random scatter around the horizontal line at y=0, suggesting that the model assumptions of linearity and homoscedasticity are met. This indicates that the GAM captures the relationship between the predictors and the response adequately. The Q-Q plot shows that residuals closely follow a straight line, reinforcing the assumption of normality. However, minor deviations, particularly in the tails, suggest potential departures from normality, indicating that some extreme values may not be adequately represented by the model.
+
+In summary, the GAM analysis reveals a generally adequate fit, with most model assumptions satisfied. However, concerns about the normality of residuals persist, suggesting some limitations in the model's explanatory power. Although the model captures the relationships among the predictors and total accidents reasonably well, it indicates a need for refinement to enhance its robustness and effectiveness in predicting outcomes.
+
+
+### Compare the models 
+
+```{r}
+# Calculate AIC for both models
+linear_aic <- AIC(linear_model)
+gam_aic <- AIC(gam_model)
+
+# Print the AIC values
+print(paste("AIC for Linear Model:", linear_aic))
+print(paste("AIC for GAM Model:", gam_aic))
+```
+
+The GAM model has a lower AIC value than the linear model, indicating that it provides a better fit for the data while balancing complexity and goodness of fit. This suggests that the GAM effectively captures non-linear relationships between the predictors and total accidents, making it the preferred model in this analysis.
+
+**Coefficient Estimates**
+
+The GAM model's output includes smooth terms for the predictors, indicating their non-linear relationships with the total accidents. The coefficients suggest:
+
+- Maximum Temperature (MaxTemp): Exhibits a slight negative relationship, but the effect is not statistically significant.
+- Rainfall: Displays a very weak relationship, implying that variations in rainfall have minimal impact on total accidents.
+- EHF (Extreme Heat Factor): Shows a more pronounced negative relationship, suggesting a significant decrease in total accidents as EHF increases.
+
+These insights are derived from the smooth terms, which capture the nuanced effects of the predictors better than a traditional linear model.
+
+**Visualizations**
+
+The "Fitted Values vs. Residuals" plot and the Q-Q plot suggest that a linear model is reasonably appropriate because:
+
+Random Scatter: The points in the "Fitted Values vs. Residuals" plot are randomly scattered around the horizontal line at y=0, indicating no clear pattern. This suggests that the residuals are evenly distributed, which is a characteristic of a well-fitting linear model.
+Straight Line: The points in the Q-Q plot fall roughly along a straight line, suggesting that the residuals are normally distributed. Normality of residuals is another assumption of linear regression.
+The GAM plots suggest that non-linear relationships might exist between some predictors and the response variable because:
+
+Non-Linear Shapes: The lines in the GAM plots are not straight, indicating that the relationships between the predictors and the response might not be linear.
+Confidence Intervals: The confidence intervals around the lines in the GAM plots suggest that the non-linear relationships might be statistically significant.
+In essence, while the simpler plots suggest a linear relationship, the more flexible GAM model is able to detect potential non-linear patterns in the data.
+
+
+### Analysing the residuals
+
+**Linear Model:**
+
+The "Fitted Values vs. Residuals" plot shows random scatter with no discernible pattern, indicating that the relationship between predictors and response is appropriately captured by the linear model.
+Homoscedasticity is maintained as the variance of residuals remains constant across fitted values.
+
+**GAM:**
+
+Similarly, the GAM's residual plot also shows random scatter with no visible pattern, suggesting that the smooth functions adequately model non-linear relationships.
+Homoscedasticity holds, as there is no significant change in residual spread across fitted values.
+
+**Conclusion:**
+Both models show no notable correlation patterns or heteroscedasticity in residuals, indicating that their assumptions are reasonably met.
+
+### Significance of the predictor EHF
+
+The predictor EHF improves the model fit. The GAM, which includes EHF, has a lower AIC (8652.66) than the linear model (8653.94), indicating a better fit. The GAM's partial effect plot shows a significant negative relationship between EHF and total accidents, which is stronger than for other predictors. Thus, EHF captures important non-linear effects, enhancing the model's overall performance.
+
+
+
+EHF is a reasonably good predictor for road traffic accidents, as it has a significant negative relationship with accident numbers in the GAM model. The inclusion of EHF improves the model fit, as indicated by a lower AIC (8652.66) compared to the linear model (8653.94).
+
+However, additional weather features might provide even better predictions.
+
+Now, I will add solar exposure as an additional weather feature to the model to assess whether it improves the prediction of road traffic accidents. Solar exposure can influence visibility, driver fatigue, and road surface conditions, making it a plausible factor for predicting accident numbers.
+
+
+```{r}
+
+solar_2016 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0016_086338_2016_Data.csv")
+solar_2017 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0016_086338_2017_Data.csv")
+solar_2018 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0016_086338_2018_Data.csv")
+solar_2019 <- read_csv("/Users/seharaejaz/Downloads/IDCJAC0016_086338_2019_Data.csv")
+
+solar_data <- rbind(solar_2016, solar_2017, solar_2018, solar_2019)
+
+solar_data
+```
+
+
+```{r}
+# Combine Year, Month, and Day into a single Date column
+solar_data$DATE <- as.Date(paste(solar_data$Year, solar_data$Month, solar_data$Day, sep = "-"), format = "%Y-%m-%d")
+
+solar_data <- solar_data[, !(names(solar_data) %in% c("Year", "Month", "Day"))]
+
+head(solar_data)
+```
+
+```{r}
+# Merge datasets on the Date column
+ merged_data<- merge(filtered_data, solar_data, by = "DATE", all.x = TRUE)
+
+ merged_data <-  merged_data %>%
+  rename(
+    SolarExposure = `Daily global solar exposure (MJ/m*m)`,
+  )
+
+# View the merged data
+head(merged_data)
+```
+
+```{r}
+# Linear model with solar exposure
+lm_with_solar <- lm(total_accidents ~ MaxTemp + Rainfall + EHF + SolarExposure, data = merged_data)
+
+# Generalized Additive Model (GAM) with solar exposure
+library(mgcv)
+gam_with_solar <- gam(total_accidents ~ s(MaxTemp) + s(Rainfall) + s(EHF) + s(SolarExposure), data = merged_data)
+
+# Compare AIC for both models
+lm_aic_with_solar <- AIC(lm_with_solar)
+gam_aic_with_solar <- AIC(gam_with_solar)
+
+# Print the AIC values
+print(paste("AIC for Linear Model with Solar Exposure:", lm_aic_with_solar))
+print(paste("AIC for GAM Model with Solar Exposure:", gam_aic_with_solar))
+
+```
+
+We can clearly see that, after incorporating solar exposure into both models, the AIC values indicate an improvement in model fit:
+
+#### AIC Comparison
+**Before Adding Solar Exposure:**
+
+Linear Model: 8653.94
+GAM: 8652.66
+
+**After Adding Solar Exposure:**
+
+Linear Model: 8646.63
+GAM: 8632.81
+
+**Conclusion**
+The AIC decreased for both models, with the GAM model showing a significant improvement of 19.85 points. This reduction suggests that adding solar exposure enhances the model fit, making it a valuable predictor for road traffic accidents.
+
+
+
+
+
+
+
+
+
